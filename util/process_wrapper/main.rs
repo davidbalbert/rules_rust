@@ -17,6 +17,7 @@ mod options;
 mod output;
 mod rustc;
 mod util;
+mod worker;
 
 use std::collections::HashMap;
 use std::fmt;
@@ -26,7 +27,7 @@ use std::process::{exit, Command, ExitStatus, Stdio};
 
 use tinyjson::JsonValue;
 
-use crate::options::options;
+use crate::options::{options, Options};
 use crate::output::{process_output, LineOutput};
 use crate::rustc::ErrorFormat;
 
@@ -117,15 +118,21 @@ fn process_line(
     }
 }
 
-fn main() -> Result<(), ProcessWrapperError> {
-    let opts = options().map_err(|e| ProcessWrapperError(e.to_string()))?;
+/// Result of a compilation, including exit code and captured output.
+pub(crate) struct CompileResult {
+    pub(crate) exit_code: i32,
+    pub(crate) output: String,
+}
 
-    let mut command = Command::new(opts.executable);
+/// Runs a single compilation. If `capture_output` is true, stderr is captured
+/// and returned in the result instead of being written to the process stderr.
+fn run_compile_impl(opts: Options, capture_output: bool) -> Result<CompileResult, ProcessWrapperError> {
+    let mut command = Command::new(&opts.executable);
     command
-        .args(opts.child_arguments)
+        .args(&opts.child_arguments)
         .env_clear()
-        .envs(opts.child_environment)
-        .stdout(if let Some(stdout_file) = opts.stdout_file {
+        .envs(&opts.child_environment)
+        .stdout(if let Some(ref stdout_file) = opts.stdout_file {
             OpenOptions::new()
                 .create(true)
                 .truncate(true)
@@ -142,7 +149,11 @@ fn main() -> Result<(), ProcessWrapperError> {
         .spawn()
         .map_err(|e| ProcessWrapperError(format!("failed to spawn child process: {}", e)))?;
 
-    let mut stderr: Box<dyn io::Write> = if let Some(stderr_file) = opts.stderr_file {
+    // For worker mode, we capture output to a buffer; otherwise write to stderr or file
+    let mut captured_output = Vec::new();
+    let mut stderr: Box<dyn io::Write> = if capture_output {
+        Box::new(&mut captured_output)
+    } else if let Some(ref stderr_file) = opts.stderr_file {
         Box::new(
             OpenOptions::new()
                 .create(true)
@@ -159,7 +170,9 @@ fn main() -> Result<(), ProcessWrapperError> {
         "unable to get child stderr".to_string(),
     ))?;
 
-    let mut output_file: Option<std::fs::File> = if let Some(output_file_name) = opts.output_file {
+    let mut output_file: Option<std::fs::File> = if let Some(ref output_file_name) =
+        opts.output_file
+    {
         Some(
             OpenOptions::new()
                 .create(true)
@@ -201,6 +214,10 @@ fn main() -> Result<(), ProcessWrapperError> {
             move |line| Ok(LineOutput::Message(line)),
         )
     };
+    
+    // Drop stderr writer to release the borrow on captured_output
+    drop(stderr);
+    
     result.map_err(|e| ProcessWrapperError(format!("failed to process stderr: {}", e)))?;
 
     let status = child
@@ -210,7 +227,7 @@ fn main() -> Result<(), ProcessWrapperError> {
     let code = status_code(status, was_killed);
     let success = code == 0;
     if success {
-        if let Some(tf) = opts.touch_file {
+        if let Some(ref tf) = opts.touch_file {
             OpenOptions::new()
                 .create(true)
                 .truncate(true)
@@ -218,8 +235,8 @@ fn main() -> Result<(), ProcessWrapperError> {
                 .open(tf)
                 .map_err(|e| ProcessWrapperError(format!("failed to create touch file: {}", e)))?;
         }
-        if let Some((copy_source, copy_dest)) = opts.copy_output {
-            copy(&copy_source, &copy_dest).map_err(|e| {
+        if let Some((ref copy_source, ref copy_dest)) = opts.copy_output {
+            copy(copy_source, copy_dest).map_err(|e| {
                 ProcessWrapperError(format!(
                     "failed to copy {} into {}: {}",
                     copy_source, copy_dest, e
@@ -228,6 +245,34 @@ fn main() -> Result<(), ProcessWrapperError> {
         }
     }
 
+    let output = if capture_output {
+        String::from_utf8_lossy(&captured_output).into_owned()
+    } else {
+        String::new()
+    };
+
+    Ok(CompileResult { exit_code: code, output })
+}
+
+fn run_one_compile(opts: Options) -> Result<i32, ProcessWrapperError> {
+    run_compile_impl(opts, false).map(|r| r.exit_code)
+}
+
+pub(crate) fn run_one_compile_capturing_output(opts: Options) -> Result<CompileResult, ProcessWrapperError> {
+    run_compile_impl(opts, true)
+}
+
+fn main() -> Result<(), ProcessWrapperError> {
+    let args: Vec<String> = std::env::args().collect();
+    let is_persistent_worker = args.iter().any(|a| a == "--persistent_worker");
+
+    if is_persistent_worker {
+        worker::run_worker_loop(args, run_one_compile_capturing_output)?;
+        return Ok(());
+    }
+
+    let opts = options().map_err(|e| ProcessWrapperError(e.to_string()))?;
+    let code = run_one_compile(opts)?;
     exit(code)
 }
 

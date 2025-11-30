@@ -170,3 +170,18 @@ rust_test(
     },
     deps = ["//rust/runfiles"],
 )
+
+rust_test(
+    name = "worker_test",
+    srcs = ["worker_test.rs"],
+    data = [
+        ":fake_rustc",
+        "//util/process_wrapper",
+    ],
+    edition = "2021",
+    rustc_env = {
+        "FAKE_RUSTC_RLOCATIONPATH": "$(rlocationpath :fake_rustc)",
+        "PROCESS_WRAPPER_RLOCATIONPATH": "$(rlocationpath //util/process_wrapper)",
+    },
+    deps = ["//rust/runfiles"],
+)

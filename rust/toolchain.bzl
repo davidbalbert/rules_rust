@@ -773,6 +773,7 @@ def _rust_toolchain_impl(ctx):
         _codegen_units = ctx.attr._codegen_units[BuildSettingInfo].value,
         _experimental_use_allocator_libraries_with_mangled_symbols = ctx.attr.experimental_use_allocator_libraries_with_mangled_symbols,
         _experimental_use_allocator_libraries_with_mangled_symbols_setting = ctx.attr._experimental_use_allocator_libraries_with_mangled_symbols_setting[BuildSettingInfo].value,
+        _experimental_use_workers = ctx.attr.experimental_use_workers,
     )
     return [
         toolchain,
@@ -842,6 +843,15 @@ rust_toolchain = rule(
         "experimental_link_std_dylib": attr.label(
             default = Label("@rules_rust//rust/settings:experimental_link_std_dylib"),
             doc = "Label to a boolean build setting that controls whether whether to link libstd dynamically.",
+        ),
+        "experimental_use_workers": attr.bool(
+            default = False,
+            doc = (
+                "If True, enable Bazel persistent workers for Rust compilation. " +
+                "This allows rustc's incremental compilation cache to persist between builds, " +
+                "potentially providing 2-6x faster incremental compilation times. " +
+                "Note: This is experimental and currently only works with local execution."
+            ),
         ),
         "experimental_use_allocator_libraries_with_mangled_symbols": attr.int(
             doc = (

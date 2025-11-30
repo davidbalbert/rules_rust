@@ -1410,6 +1410,14 @@ def rustc_compile_action(
             action_outputs.append(dsym_folder)
 
     if ctx.executable._process_wrapper:
+        # Build execution requirements - enable workers if configured
+        execution_requirements = {}
+        if getattr(toolchain, "_experimental_use_workers", False):
+            execution_requirements["supports-workers"] = "1"
+            execution_requirements["requires-worker-protocol"] = "json"
+            # Initially only local execution for workers
+            execution_requirements["no-remote"] = "1"
+
         # Run as normal
         ctx.actions.run(
             executable = ctx.executable._process_wrapper,
@@ -1427,6 +1435,7 @@ def rustc_compile_action(
             ),
             toolchain = "@rules_rust//rust:toolchain_type",
             resource_set = get_rustc_resource_set(toolchain),
+            execution_requirements = execution_requirements if execution_requirements else None,
         )
         if args_metadata:
             ctx.actions.run(
@@ -1444,6 +1453,7 @@ def rustc_compile_action(
                     "" if len(srcs) == 1 else "s",
                 ),
                 toolchain = "@rules_rust//rust:toolchain_type",
+                execution_requirements = execution_requirements if execution_requirements else None,
             )
     elif hasattr(ctx.executable, "_bootstrap_process_wrapper"):
         # Run without process_wrapper

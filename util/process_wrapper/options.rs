@@ -52,6 +52,10 @@ pub(crate) struct Options {
 }
 
 pub(crate) fn options() -> Result<Options, OptionError> {
+    options_from_args(env::args().collect())
+}
+
+pub(crate) fn options_from_args(argv: Vec<String>) -> Result<Options, OptionError> {
     // Process argument list until -- is encountered.
     // Everything after is sent to the child process.
     let mut subst_mapping_raw = None;
@@ -122,10 +126,7 @@ pub(crate) fn options() -> Result<Options, OptionError> {
         &mut require_explicit_unstable_features,
     );
 
-    let mut child_args = match flags
-        .parse(env::args().collect())
-        .map_err(OptionError::FlagError)?
-    {
+    let mut child_args = match flags.parse(argv).map_err(OptionError::FlagError)? {
         ParseOutcome::Help(help) => {
             eprintln!("{help}");
             exit(0);

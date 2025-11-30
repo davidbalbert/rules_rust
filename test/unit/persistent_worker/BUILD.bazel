@@ -1,0 +1,3 @@
+load(":persistent_worker_test.bzl", "persistent_worker_test_suite")
+
+persistent_worker_test_suite(name = "persistent_worker_test_suite")
