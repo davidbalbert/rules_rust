@@ -272,6 +272,35 @@ def _test_std_dylib_runfiles_rpath(name):
         },
     )
 
+def _test_external_repo_runfiles_rpath_impl(env, target):
+    # Windows has no rpaths.
+    windows = env.ctx.attr._windows[platform_common.ConstraintValueInfo]
+    if env.ctx.target_platform_has_constraint(windows):
+        return
+
+    action = target.actions[0]
+
+    # The dylib's `_solib_<cpu>` symlink belongs to the main repository even
+    # though the dylib is in an external repository, so from inside the
+    # runfiles tree it is reached through `../<main repository>/`.
+    marker = "../{}/_solib_".format(env.ctx.workspace_name)
+    env.expect \
+        .that_bool(any([
+        "link-arg=" in arg and marker in arg and ".runfiles" not in arg
+        for arg in action.argv
+    ])) \
+        .equals(True)
+
+def _test_external_repo_runfiles_rpath(name):
+    analysis_test(
+        name = name,
+        impl = _test_external_repo_runfiles_rpath_impl,
+        target = "@rust_dylib_in_external_repo//:dylib_with_dylib_dep",
+        attrs = {
+            "_windows": attr.label(default = "@platforms//os:windows"),
+        },
+    )
+
 def _has_dylib_symlink_next_to_binary(target, dylib_dep):
     """Check that a dylib output exists next to the binary in DefaultInfo.files."""
     dep_name = dylib_dep.label.name
@@ -318,6 +347,7 @@ def link_std_dylib_test_suite(name):
             _test_rust_test_with_attr,
             _test_runfiles_rpath,
             _test_std_dylib_runfiles_rpath,
+            _test_external_repo_runfiles_rpath,
             _test_windows_dylib_symlink,
         ],
     )

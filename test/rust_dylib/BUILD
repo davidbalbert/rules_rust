@@ -1,3 +1,4 @@
+load("@rules_cc//cc:defs.bzl", "cc_test")
 load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_dylib_library", "rust_test")
 
 # Integration tests for rust_dylib_library: verifies that a binary depending
@@ -34,4 +35,20 @@ rust_test(
     link_std_dylib = True,
     target_compatible_with = NOT_WINDOWS,
     deps = [":rust_dylib_lib"],
+)
+
+# A Rust ABI dylib in an external repository, with a dylib dep, loaded with
+# dlopen from this test's runfiles tree. Exercises the runfiles-relative RPATHs
+# for outputs in external repositories, whose `_solib_<cpu>` deps live in the
+# main repository.
+cc_test(
+    name = "external_dylib_dlopen_test",
+    srcs = ["dlopen.c"],
+    args = ["$(rootpath @rust_dylib_in_external_repo//:dylib_with_dylib_dep)"],
+    data = ["@rust_dylib_in_external_repo//:dylib_with_dylib_dep"],
+    linkopts = select({
+        "@platforms//os:linux": ["-ldl"],
+        "//conditions:default": [],
+    }),
+    target_compatible_with = NOT_WINDOWS,
 )
