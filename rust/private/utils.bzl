@@ -18,6 +18,7 @@ load("@bazel_skylib//lib:paths.bzl", "paths")
 load("@rules_cc//cc:find_cc_toolchain.bzl", find_rules_cc_toolchain = "find_cc_toolchain")
 load("@rules_cc//cc/common:cc_common.bzl", "cc_common")
 load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
+load("@rules_cc//cc/common:cc_shared_library_info.bzl", "CcSharedLibraryInfo")
 load(
     ":providers.bzl",
     "AlwaysEnableMetadataOutputGroupsInfo",
@@ -550,6 +551,7 @@ def transform_deps(deps):
         dep_info = dep[DepInfo] if DepInfo in dep else None,
         build_info = dep[BuildInfo] if BuildInfo in dep else None,
         cc_info = dep[CcInfo] if CcInfo in dep else None,
+        cc_shared_library_info = dep[CcSharedLibraryInfo] if CcSharedLibraryInfo in dep else None,
         crate_group_info = dep[CrateGroupInfo] if CrateGroupInfo in dep else None,
     ) for dep in deps]
 

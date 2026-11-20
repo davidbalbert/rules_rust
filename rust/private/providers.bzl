@@ -62,6 +62,7 @@ DepInfo = provider(
         "direct_crates": "depset[AliasableDepInfo]",
         "link_search_path_files": "depset[File]: All transitive files containing search paths to pass to the linker",
         "transitive_build_infos": "depset[BuildInfo]",
+        "transitive_cc_shared_libraries": "depset[struct]: The Rust shared libraries (`rust_dylib_library`) that the crate's non-macro dependencies link dynamically, transitively, as `CcSharedLibraryInfo.dynamic_deps` entries: structs with `exports`, `linker_input`, and `link_once_static_libs`. May be missing from `DepInfo`s that other rules create.",
         "transitive_crate_outputs": "depset[File]: All transitive crate outputs.",
         "transitive_crates": "depset[CrateInfo]",
         "transitive_data": "depset[File]: Data of all transitive non-macro dependencies.",
@@ -102,6 +103,7 @@ DepVariantInfo = provider(
     fields = {
         "build_info": "BuildInfo: The BuildInfo of a Rust dependency",
         "cc_info": "CcInfo: The CcInfo of a C/C++ dependency",
+        "cc_shared_library_info": "CcSharedLibraryInfo: The CcSharedLibraryInfo of a Rust shared library dependency. May be missing from `DepVariantInfo`s that other rules create.",
         "crate_group_info": "CrateGroupInfo: The CrateGroupInfo of a Rust crate group dependency",
         "crate_info": "CrateInfo: The CrateInfo of a Rust dependency",
         "dep_info": "DepInfo: The DepInfo of a Rust dependency",

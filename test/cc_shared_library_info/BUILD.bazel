@@ -1,0 +1,182 @@
+load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_test")
+load(
+    "@rules_rust//rust:defs.bzl",
+    "rust_dylib_library",
+    "rust_library",
+    "rust_shared_library",
+)
+load(":cc_shared_library_info_test.bzl", "cc_shared_library_info_test_suite")
+
+NOT_WINDOWS = select({
+    "@platforms//os:linux": [],
+    "@platforms//os:macos": [],
+    "//conditions:default": ["@platforms//:incompatible"],
+})
+
+rust_library(
+    name = "shared_crate",
+    srcs = ["lib.rs"],
+    edition = "2021",
+)
+
+cc_library(
+    name = "c_lib",
+    srcs = ["c_lib.c"],
+)
+
+# A cdylib with a crate and a native library linked into it statically.
+rust_shared_library(
+    name = "cdylib",
+    srcs = ["cdylib.rs"],
+    edition = "2021",
+    link_deps = [":c_lib"],
+    deps = [":shared_crate"],
+)
+
+# A native library depending on a crate, linked into a cdylib. The crate's
+# CcInfo carries the standard library, which isn't listed.
+cc_library(
+    name = "c_lib_with_crate_dep",
+    srcs = ["c_lib.c"],
+    deps = [":shared_crate"],
+)
+
+rust_shared_library(
+    name = "cdylib_with_crate_through_c_lib",
+    srcs = ["cdylib.rs"],
+    edition = "2021",
+    link_deps = [":c_lib_with_crate_dep"],
+)
+
+# A dylib with no dependencies.
+rust_dylib_library(
+    name = "dylib",
+    srcs = ["dylib.rs"],
+    edition = "2021",
+    target_compatible_with = NOT_WINDOWS,
+)
+
+# A dylib with a crate and a native library linked into it statically.
+rust_dylib_library(
+    name = "dylib_with_deps",
+    srcs = ["dylib_with_deps.rs"],
+    edition = "2021",
+    link_deps = [":c_lib"],
+    target_compatible_with = NOT_WINDOWS,
+    deps = [":shared_crate"],
+)
+
+# A dylib depending on another one.
+rust_dylib_library(
+    name = "dylib_with_dylib_dep",
+    srcs = ["dylib.rs"],
+    edition = "2021",
+    target_compatible_with = NOT_WINDOWS,
+    deps = [":dylib_with_deps"],
+)
+
+# An rlib depending on a dylib, through which a shared library reaches the
+# dylib without depending on it directly.
+rust_library(
+    name = "dylib_rlib",
+    srcs = ["dylib_rlib.rs"],
+    edition = "2021",
+    target_compatible_with = NOT_WINDOWS,
+    deps = [":dylib_with_deps"],
+)
+
+# cdylibs depending on a dylib, directly, through an rlib, both ways, and
+# through another dylib.
+[
+    rust_shared_library(
+        name = name,
+        srcs = ["cdylib.rs"],
+        edition = "2021",
+        link_std_dylib = True,
+        target_compatible_with = NOT_WINDOWS,
+        deps = deps,
+    )
+    for name, deps in [
+        (
+            "cdylib_with_dylib_dep",
+            [":dylib_with_deps"],
+        ),
+        (
+            "cdylib_with_dylib_through_rlib",
+            [":dylib_rlib"],
+        ),
+        (
+            "cdylib_with_dylib_diamond",
+            [
+                ":dylib_rlib",
+                ":dylib_with_deps",
+            ],
+        ),
+        (
+            "cdylib_with_dylib_chain",
+            [":dylib_with_dylib_dep"],
+        ),
+    ]
+]
+
+# Two cdylibs that link the same crate statically, which rules_cc rejects when
+# they are both in a binary's dynamic_deps.
+[
+    rust_shared_library(
+        name = name,
+        srcs = [name + ".rs"],
+        edition = "2021",
+        deps = [":shared_crate"],
+    )
+    for name in [
+        "cdylib_a",
+        "cdylib_b",
+    ]
+]
+
+cc_binary(
+    name = "binary_with_duplicate_crate",
+    srcs = ["main.c"],
+    dynamic_deps = [
+        ":cdylib_a",
+        ":cdylib_b",
+    ],
+    tags = ["manual"],
+)
+
+# The same two cdylibs, sharing the crate through a dylib instead, which
+# rules_cc accepts.
+rust_dylib_library(
+    name = "shared_crate_dylib",
+    srcs = ["lib.rs"],
+    crate_name = "shared_crate",
+    edition = "2021",
+    target_compatible_with = NOT_WINDOWS,
+)
+
+[
+    rust_shared_library(
+        name = name + "_with_shared_dylib",
+        srcs = [name + ".rs"],
+        edition = "2021",
+        link_std_dylib = True,
+        target_compatible_with = NOT_WINDOWS,
+        deps = [":shared_crate_dylib"],
+    )
+    for name in [
+        "cdylib_a",
+        "cdylib_b",
+    ]
+]
+
+cc_test(
+    name = "test_with_shared_dylib",
+    srcs = ["main.c"],
+    dynamic_deps = [
+        ":cdylib_a_with_shared_dylib",
+        ":cdylib_b_with_shared_dylib",
+    ],
+    target_compatible_with = NOT_WINDOWS,
+)
+
+cc_shared_library_info_test_suite(name = "cc_shared_library_info_test_suite")
