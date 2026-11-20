@@ -26,6 +26,7 @@ load("@rules_cc//cc/common:cc_common.bzl", "cc_common")
 load("@rules_cc//cc/common:cc_debug_helper.bzl", "create_debug_packager_actions")
 load("@rules_cc//cc/common:cc_helper.bzl", "cc_helper", "linker_mode")
 load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
+load("@rules_cc//cc/common:cc_shared_library_info.bzl", "CcSharedLibraryInfo")
 load("@rules_cc//cc/common:debug_package_info.bzl", "DebugPackageInfo")
 load(":common.bzl", "rust_common")
 load(":lto.bzl", "construct_lto_arguments")
@@ -205,6 +206,9 @@ def collect_deps(
     direct_crates = []
     transitive_crates = []
 
+    direct_cc_shared_libraries = []
+    transitive_cc_shared_libraries = []
+
     transitive_data = []
     transitive_proc_macro_data = []
     transitive_noncrates = []
@@ -258,6 +262,13 @@ def collect_deps(
             direct_crates.append(crate_info)
             if not is_proc_macro:
                 transitive_crates.append(dep_info.transitive_crates)
+
+                cc_shared_library_info = getattr(dep, "cc_shared_library_info", None)
+                if cc_shared_library_info:
+                    direct_cc_shared_libraries.append(_cc_shared_library_entry(cc_shared_library_info))
+                transitive_cc_shared_libraries.append(
+                    getattr(dep_info, "transitive_cc_shared_libraries", None) or depset(),
+                )
 
             if is_proc_macro:
                 # This crate's data and its non-macro dependencies' data are proc macro data.
@@ -326,6 +337,11 @@ def collect_deps(
             transitive_crates = depset(
                 direct_crates,
                 transitive = transitive_crates,
+            ),
+            transitive_cc_shared_libraries = depset(
+                direct_cc_shared_libraries,
+                transitive = transitive_cc_shared_libraries,
+                order = "topological",
             ),
             transitive_data = depset(
                 transitive = transitive_data,
@@ -2355,7 +2371,7 @@ def rustc_compile_action(
         compilation_mode = ctx.var["COMPILATION_MODE"],
         toolchain = toolchain,
     )
-    providers += establish_cc_info(ctx, attr, crate_info, toolchain, cc_toolchain, feature_configuration, interface_library, use_pic, debug_context)
+    providers += establish_cc_info(ctx, attr, crate_info, toolchain, cc_toolchain, feature_configuration, interface_library, use_pic, debug_context, dep_info)
     providers += _establish_debug_package_info(
         ctx = ctx,
         crate_info = crate_info,
@@ -2653,8 +2669,12 @@ def _add_codegen_units_flags(toolchain, emit, args):
 
     args.add("-Ccodegen-units={}".format(toolchain._codegen_units))
 
-def establish_cc_info(ctx, attr, crate_info, toolchain, cc_toolchain, feature_configuration, interface_library, use_pic, debug_context = None):
+def establish_cc_info(ctx, attr, crate_info, toolchain, cc_toolchain, feature_configuration, interface_library, use_pic, debug_context = None, dep_info = None):
     """If the produced crate is suitable yield a CcInfo to allow for interop with cc rules
+
+    For a shared library (`cdylib` or `dylib`), also yields a `CcSharedLibraryInfo`, so that it can
+    be used in the `dynamic_deps` of `cc_binary` and `cc_shared_library`, and so that the link-once
+    checks of `rules_cc` see it.
 
     Args:
         ctx (ctx): The rule's context object
@@ -2666,10 +2686,12 @@ def establish_cc_info(ctx, attr, crate_info, toolchain, cc_toolchain, feature_co
         interface_library (File): Optional interface library for cdylib crates on Windows.
         use_pic: (boolean): Whether the build should use PIC.
         debug_context (CcDebugContextInfo): The current debug context.
+        dep_info (DepInfo): The crate's dependency info. Required for `cdylib` and `dylib` crates.
 
     Returns:
-        list: A list containing the `CcInfo` provider and optionally `AllocatorLibrariesImplInfo`
-            provider used when this crate is used as the rust allocator library implementation.
+        list: A list containing the `CcInfo` provider, a `CcSharedLibraryInfo` provider for `cdylib`
+            and `dylib` crates, and optionally `AllocatorLibrariesImplInfo` provider used when this
+            crate is used as the rust allocator library implementation.
     """
 
     # A test will not need to produce CcInfo as nothing can depend on test targets
@@ -2782,12 +2804,112 @@ def establish_cc_info(ctx, attr, crate_info, toolchain, cc_toolchain, feature_co
             cc_infos.append(libstd_and_allocator_cc_info)
 
     providers = [cc_common.merge_cc_infos(cc_infos = cc_infos)]
+    if crate_info.type in ("cdylib", "dylib"):
+        providers.append(_establish_cc_shared_library_info(crate_info, dep_info, toolchain, link_input))
     if crate_info.type == "staticlib":
         # The static archive is the output.
         dot_a = crate_info.output
     if dot_a:
         providers.append(AllocatorLibrariesImplInfo(static_archive = dot_a))
     return providers
+
+def _cc_shared_library_entry(cc_shared_library_info):
+    """Returns the `CcSharedLibraryInfo.dynamic_deps` entry for a shared library.
+
+    Entries for the same shared library, created by each crate that depends on it, are equal, so a
+    depset deduplicates them, as with `cc_shared_library`.
+
+    Args:
+        cc_shared_library_info (CcSharedLibraryInfo): The shared library's provider.
+
+    Returns:
+        struct: The entry, with `exports`, `linker_input`, and `link_once_static_libs`.
+    """
+    return struct(
+        exports = cc_shared_library_info.exports,
+        linker_input = cc_shared_library_info.linker_input,
+        link_once_static_libs = cc_shared_library_info.link_once_static_libs,
+    )
+
+def _rust_runtime_owners(toolchain):
+    """Returns the owners of the standard library and allocator linker inputs.
+
+    Args:
+        toolchain (rust_toolchain): The current `rust_toolchain`.
+
+    Returns:
+        dict: The owners, as strings, mapped to None.
+    """
+    owners = {}
+    for name in (
+        "libstd_and_allocator_ccinfo",
+        "libstd_and_global_allocator_ccinfo",
+        "nostd_and_global_allocator_ccinfo",
+        "libstd_dylib_and_allocator_ccinfo",
+        "libstd_dylib_and_global_allocator_ccinfo",
+    ):
+        cc_info = getattr(toolchain, name, None)
+        if cc_info:
+            for linker_input in cc_info.linking_context.linker_inputs.to_list():
+                owners[str(linker_input.owner)] = None
+    return owners
+
+def _establish_cc_shared_library_info(crate_info, dep_info, toolchain, linker_input):
+    """Returns the `CcSharedLibraryInfo` of a `cdylib` or `dylib` crate.
+
+    The fields mean what they mean for a `cc_shared_library`:
+    - `dynamic_deps`: the Rust shared libraries (`rust_dylib_library`) it links, transitively.
+    - `link_once_static_libs`: the crates and native libraries linked statically into it. Anything
+      a shared library in `dynamic_deps` contains is linked through that library instead, as rustc
+      does for crates. The standard library is left out: when linked statically, every Rust shared
+      library has its own copy.
+    - `exports`: the crates in a `dylib`, which consumers link through it. A `cdylib` only exports
+      C symbols, so nothing can link its crates through it.
+
+    Args:
+        crate_info (CrateInfo): The crate.
+        dep_info (DepInfo): The crate's dependency info.
+        toolchain (rust_toolchain): The current `rust_toolchain`.
+        linker_input (LinkerInput): The shared library, as in the crate's `CcInfo`.
+
+    Returns:
+        CcSharedLibraryInfo: The provider.
+    """
+    if not dep_info:
+        fail("A DepInfo is required to create the CcSharedLibraryInfo of " + str(linker_input.owner))
+
+    dynamic_deps = getattr(dep_info, "transitive_cc_shared_libraries", None) or depset()
+
+    in_dynamic_deps = {}
+    for entry in dynamic_deps.to_list():
+        for label in entry.exports:
+            in_dynamic_deps[label] = None
+        for label in entry.link_once_static_libs:
+            in_dynamic_deps[label] = None
+
+    crates = {str(linker_input.owner): None}
+    for crate in dep_info.transitive_crates.to_list():
+        if not crate.owner:
+            continue
+        label = str(crate.owner)
+        if label not in in_dynamic_deps:
+            crates[label] = None
+
+    rust_runtime_owners = _rust_runtime_owners(toolchain)
+    native_libs = {}
+    for dep_linker_input in dep_info.transitive_noncrates.to_list():
+        label = str(dep_linker_input.owner)
+        if label in in_dynamic_deps or label in rust_runtime_owners or label in crates:
+            continue
+        if [lib for lib in dep_linker_input.libraries if not _is_dylib(lib)]:
+            native_libs[label] = None
+
+    return CcSharedLibraryInfo(
+        dynamic_deps = dynamic_deps,
+        exports = crates.keys() if crate_info.type == "dylib" else [],
+        link_once_static_libs = crates.keys() + native_libs.keys(),
+        linker_input = linker_input,
+    )
 
 def add_edition_flags(args, crate):
     """Adds the Rust edition flag to an arguments object reference

@@ -18,6 +18,7 @@ load("@bazel_skylib//lib:paths.bzl", "paths")
 load("@bazel_skylib//rules:common_settings.bzl", "BuildSettingInfo")
 load("@rules_cc//cc:find_cc_toolchain.bzl", "use_cc_toolchain")
 load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
+load("@rules_cc//cc/common:cc_shared_library_info.bzl", "CcSharedLibraryInfo")
 load(":common.bzl", "COMMON_PROVIDERS", "rust_common")
 load(
     ":providers.bzl",
@@ -643,6 +644,7 @@ def _rust_library_group_impl(ctx):
                 dep_info = dep[rust_common.dep_info] if rust_common.crate_info in dep else None,
                 build_info = dep[BuildInfo] if BuildInfo in dep else None,
                 cc_info = dep[CcInfo] if CcInfo in dep else None,
+                cc_shared_library_info = dep[CcSharedLibraryInfo] if CcSharedLibraryInfo in dep else None,
                 crate_group_info = None,
             ))
         elif rust_common.crate_group_info in dep:
@@ -1118,7 +1120,7 @@ rust_library = rule(
 
 rust_dylib_library = rule(
     implementation = _rust_dylib_library_impl,
-    provides = COMMON_PROVIDERS,
+    provides = COMMON_PROVIDERS + [CcSharedLibraryInfo],
     attrs = _COMMON_ATTRS | {
         "disable_pipelining": attr.bool(
             default = False,
@@ -1259,6 +1261,7 @@ rust_cdylib_library = rule(
     ] + use_cc_toolchain(mandatory = False),
     provides = [
         CcInfo,
+        CcSharedLibraryInfo,
         rust_common.test_crate_info,
     ],
     doc = dedent("""\
