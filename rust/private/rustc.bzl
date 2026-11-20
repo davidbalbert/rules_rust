@@ -2940,28 +2940,46 @@ def _compute_rpaths(toolchain, output_dir, dep_info, use_pic, link_std_dylib, ou
     ]
 
     if output_file and workspace_name:
+        dylib_runfiles_dirs = {
+            paths.dirname(_runfiles_path(f, workspace_name)): None
+            for f in dylibs
+        }
+
         # (B) Runfiles-from-outside RPATHs.
         runfiles_base = output_file.basename + ".runfiles"
-        runfiles_dirs = {}
-        for f in dylibs:
-            short_dir = paths.dirname(f.short_path)
-            if f.short_path.startswith("../"):
-                # External repo: short_path is "../<repo>/<path>", runfiles
-                # tree places it at "<repo>/<path>" at the runfiles root.
-                runfiles_dirs[paths.join(runfiles_base, short_dir[3:])] = None
-            else:
-                # Main repo: runfiles tree places it under "<workspace>/".
-                runfiles_dirs[paths.join(runfiles_base, workspace_name, short_dir)] = None
-        rpaths.extend(runfiles_dirs.keys())
+        rpaths.extend([
+            paths.join(runfiles_base, lib_dir)
+            for lib_dir in dylib_runfiles_dirs
+        ])
 
-        # (C) Short-path RPATHs (binary running inside runfiles tree).
-        output_short_dir = paths.dirname(output_file.short_path)
-        for f in dylibs:
-            rpath = relativize(paths.dirname(f.short_path), output_short_dir)
+        # (C) Runfiles-relative RPATHs (binary running inside runfiles tree).
+        # Both paths must be runfiles paths: relativizing short paths directly
+        # is wrong when the output and the library are in different
+        # repositories, e.g. an output in an external repository depending on
+        # a `_solib_<cpu>` symlink, which always belongs to the main repository.
+        output_runfiles_dir = paths.dirname(_runfiles_path(output_file, workspace_name))
+        for lib_dir in dylib_runfiles_dirs:
+            rpath = relativize(lib_dir, output_runfiles_dir)
             if rpath not in rpaths:
                 rpaths.append(rpath)
 
     return depset(rpaths)
+
+def _runfiles_path(file, workspace_name):
+    """Returns the path of `file` relative to the root of a runfiles tree.
+
+    Args:
+        file (File): The file.
+        workspace_name (str): The name of the main repository.
+
+    Returns:
+        str: `<repo>/<path>` for a file in an external repository, whose short
+            path is `../<repo>/<path>`, and `<workspace_name>/<path>` for a
+            file in the main repository.
+    """
+    if file.short_path.startswith("../"):
+        return file.short_path[len("../"):]
+    return paths.join(workspace_name, file.short_path)
 
 def _get_dir_names(files):
     """Returns a list of directory names from the given list of File objects

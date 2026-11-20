@@ -5,6 +5,7 @@ load("@bazel_tools//tools/build_defs/repo:utils.bzl", "maybe")
 load("//test/determinism/3rdparty/crates:crates.bzl", determinism_test_crate_repositories = "crate_repositories")
 load("//test/generated_inputs:external_repo.bzl", "generated_inputs_in_external_repo")
 load("//test/rust_analyzer/3rdparty/crates:crates.bzl", rust_analyzer_test_crate_repositories = "crate_repositories")
+load("//test/rust_dylib:external_repo.bzl", "rust_dylib_in_external_repo")
 load("//test/unit/toolchain:toolchain_test_utils.bzl", "rules_rust_toolchain_test_target_json_repository")
 load("//test/vscode/3rdparty/crates:crates.bzl", vscode_test_crate_repositories = "crate_repositories")
 
@@ -37,6 +38,7 @@ def rules_rust_test_deps():
     direct_deps = []
     direct_deps.extend(generated_inputs_in_external_repo())
     direct_deps.extend(rust_analyzer_test_crate_repositories())
+    direct_deps.extend(rust_dylib_in_external_repo())
     direct_deps.extend(vscode_test_crate_repositories())
     direct_deps.extend(determinism_test_crate_repositories())
 
