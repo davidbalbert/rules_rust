@@ -20,6 +20,7 @@ load("@rules_cc//cc:find_cc_toolchain.bzl", "use_cc_toolchain")
 load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
 load("@rules_cc//cc/common:cc_shared_library_info.bzl", "CcSharedLibraryInfo")
 load(":common.bzl", "COMMON_PROVIDERS", "rust_common")
+load(":linkable_more_than_once.bzl", "linkable_more_than_once_aspect")
 load(
     ":providers.bzl",
     "BuildInfo",
@@ -733,6 +734,34 @@ RUSTC_ATTRS = {
     ),
 }
 
+def _deps_attr(aspects = []):
+    return attr.label_list(
+        doc = dedent("""\
+            List of other Rust libraries to be linked to this library target.
+
+            These must be targets that provide `CrateInfo`, such as `rust_library`.
+        """),
+        aspects = aspects,
+    )
+
+def _link_deps_attr(aspects = []):
+    return attr.label_list(
+        doc = dedent("""\
+            List of other native libraries to be linked to this library target.
+
+            These are typically `cc_library` targets.
+        """),
+        providers = [[CcInfo], [rust_common.crate_info]],
+        aspects = aspects,
+    )
+
+# Shared libraries find the libraries tagged `LINKABLE_MORE_THAN_ONCE` among
+# their dependencies for their `CcSharedLibraryInfo`.
+_SHARED_LIBRARY_ATTRS = {
+    "deps": _deps_attr(aspects = [linkable_more_than_once_aspect]),
+    "link_deps": _link_deps_attr(aspects = [linkable_more_than_once_aspect]),
+}
+
 _COMMON_ATTRS = {
     "aliases": attr.label_keyed_string_dict(
         doc = dedent("""\
@@ -800,24 +829,11 @@ _COMMON_ATTRS = {
         """),
         allow_files = True,
     ),
-    "deps": attr.label_list(
-        doc = dedent("""\
-            List of other Rust libraries to be linked to this library target.
-
-            These must be targets that provide `CrateInfo`, such as `rust_library`.
-        """),
-    ),
+    "deps": _deps_attr(),
     "edition": attr.string(
         doc = "The rust edition to use for this crate. Defaults to the edition specified in the rust_toolchain.",
     ),
-    "link_deps": attr.label_list(
-        doc = dedent("""\
-            List of other native libraries to be linked to this library target.
-
-            These are typically `cc_library` targets.
-        """),
-        providers = [[CcInfo], [rust_common.crate_info]],
-    ),
+    "link_deps": _link_deps_attr(),
     "lint_config": attr.label(
         doc = "Set of lints to apply when building this crate.",
         providers = [LintsInfo],
@@ -1121,7 +1137,7 @@ rust_library = rule(
 rust_dylib_library = rule(
     implementation = _rust_dylib_library_impl,
     provides = COMMON_PROVIDERS + [CcSharedLibraryInfo],
-    attrs = _COMMON_ATTRS | {
+    attrs = _COMMON_ATTRS | _SHARED_LIBRARY_ATTRS | {
         "disable_pipelining": attr.bool(
             default = False,
             doc = dedent("""\
@@ -1241,7 +1257,7 @@ _rust_shared_library_transition = transition(
 
 rust_cdylib_library = rule(
     implementation = _rust_cdylib_library_impl,
-    attrs = _COMMON_ATTRS | _PLATFORM_ATTRS | _EXPERIMENTAL_USE_CC_COMMON_LINK_ATTRS | {
+    attrs = _COMMON_ATTRS | _SHARED_LIBRARY_ATTRS | _PLATFORM_ATTRS | _EXPERIMENTAL_USE_CC_COMMON_LINK_ATTRS | {
         "link_std_dylib": attr.bool(
             mandatory = False,
             default = False,

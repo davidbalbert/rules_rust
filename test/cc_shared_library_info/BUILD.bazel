@@ -179,4 +179,73 @@ cc_test(
     target_compatible_with = NOT_WINDOWS,
 )
 
+# Libraries tagged LINKABLE_MORE_THAN_ONCE, which are left out of
+# link_once_static_libs, reached through a crate and a native library.
+rust_library(
+    name = "tagged_crate",
+    srcs = ["lib.rs"],
+    crate_name = "shared_crate",
+    edition = "2021",
+    tags = ["LINKABLE_MORE_THAN_ONCE"],
+)
+
+cc_library(
+    name = "tagged_c_lib",
+    srcs = ["c_lib.c"],
+    tags = ["LINKABLE_MORE_THAN_ONCE"],
+)
+
+rust_library(
+    name = "rlib_with_tagged_dep",
+    srcs = ["rlib_with_tagged_dep.rs"],
+    edition = "2021",
+    deps = [":tagged_crate"],
+)
+
+cc_library(
+    name = "c_lib_with_tagged_dep",
+    deps = [":tagged_c_lib"],
+)
+
+rust_shared_library(
+    name = "cdylib_with_tagged_deps",
+    srcs = ["cdylib.rs"],
+    edition = "2021",
+    link_deps = [":c_lib_with_tagged_dep"],
+    deps = [":rlib_with_tagged_dep"],
+)
+
+# A tagged crate is still exported by a dylib.
+rust_dylib_library(
+    name = "dylib_with_tagged_dep",
+    srcs = ["dylib.rs"],
+    edition = "2021",
+    target_compatible_with = NOT_WINDOWS,
+    deps = [":tagged_crate"],
+)
+
+# Two cdylibs that link the same tagged crate statically, which rules_cc
+# accepts.
+[
+    rust_shared_library(
+        name = name + "_with_tagged_crate",
+        srcs = [name + ".rs"],
+        edition = "2021",
+        deps = [":tagged_crate"],
+    )
+    for name in [
+        "cdylib_a",
+        "cdylib_b",
+    ]
+]
+
+cc_test(
+    name = "test_with_tagged_crate",
+    srcs = ["main.c"],
+    dynamic_deps = [
+        ":cdylib_a_with_tagged_crate",
+        ":cdylib_b_with_tagged_crate",
+    ],
+)
+
 cc_shared_library_info_test_suite(name = "cc_shared_library_info_test_suite")
