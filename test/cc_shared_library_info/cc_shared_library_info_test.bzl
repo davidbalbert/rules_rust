@@ -147,6 +147,30 @@ def _test_duplicate_crate_fails(name):
         expect_failure = True,
     )
 
+def _test_cdylib_with_tagged_deps_impl(env, target):
+    _expect_info(
+        env,
+        target,
+        exports = [],
+        link_once_static_libs = _labels("cdylib_with_tagged_deps", "rlib_with_tagged_dep"),
+        dynamic_deps = [],
+    )
+
+def _test_cdylib_with_tagged_deps(name):
+    analysis_test(name = name, impl = _test_cdylib_with_tagged_deps_impl, target = ":cdylib_with_tagged_deps")
+
+def _test_dylib_with_tagged_dep_impl(env, target):
+    _expect_info(
+        env,
+        target,
+        exports = _labels("dylib_with_tagged_dep", "tagged_crate"),
+        link_once_static_libs = _labels("dylib_with_tagged_dep"),
+        dynamic_deps = [],
+    )
+
+def _test_dylib_with_tagged_dep(name):
+    analysis_test(name = name, impl = _test_dylib_with_tagged_dep_impl, target = ":dylib_with_tagged_dep")
+
 def cc_shared_library_info_test_suite(name):
     """Analysis tests for the `CcSharedLibraryInfo` of Rust shared libraries.
 
@@ -166,5 +190,7 @@ def cc_shared_library_info_test_suite(name):
             _test_dylib_with_dylib_dep,
             _test_cdylib_with_dylib_chain,
             _test_duplicate_crate_fails,
+            _test_cdylib_with_tagged_deps,
+            _test_dylib_with_tagged_dep,
         ],
     )

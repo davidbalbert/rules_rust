@@ -29,6 +29,7 @@ load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
 load("@rules_cc//cc/common:cc_shared_library_info.bzl", "CcSharedLibraryInfo")
 load("@rules_cc//cc/common:debug_package_info.bzl", "DebugPackageInfo")
 load(":common.bzl", "rust_common")
+load(":linkable_more_than_once.bzl", "LINKABLE_MORE_THAN_ONCE", "LinkableMoreThanOnceInfo")
 load(":lto.bzl", "construct_lto_arguments")
 load(
     ":pic_utils.bzl",
@@ -2805,7 +2806,7 @@ def establish_cc_info(ctx, attr, crate_info, toolchain, cc_toolchain, feature_co
 
     providers = [cc_common.merge_cc_infos(cc_infos = cc_infos)]
     if crate_info.type in ("cdylib", "dylib"):
-        providers.append(_establish_cc_shared_library_info(crate_info, dep_info, toolchain, link_input))
+        providers.append(_establish_cc_shared_library_info(attr, crate_info, dep_info, toolchain, link_input))
     if crate_info.type == "staticlib":
         # The static archive is the output.
         dot_a = crate_info.output
@@ -2854,7 +2855,7 @@ def _rust_runtime_owners(toolchain):
                 owners[str(linker_input.owner)] = None
     return owners
 
-def _establish_cc_shared_library_info(crate_info, dep_info, toolchain, linker_input):
+def _establish_cc_shared_library_info(attr, crate_info, dep_info, toolchain, linker_input):
     """Returns the `CcSharedLibraryInfo` of a `cdylib` or `dylib` crate.
 
     The fields mean what they mean for a `cc_shared_library`:
@@ -2862,11 +2863,14 @@ def _establish_cc_shared_library_info(crate_info, dep_info, toolchain, linker_in
     - `link_once_static_libs`: the crates and native libraries linked statically into it. Anything
       a shared library in `dynamic_deps` contains is linked through that library instead, as rustc
       does for crates. The standard library is left out: when linked statically, every Rust shared
-      library has its own copy.
+      library has its own copy. So are libraries tagged `LINKABLE_MORE_THAN_ONCE`, as for a
+      `cc_shared_library`.
     - `exports`: the crates in a `dylib`, which consumers link through it. A `cdylib` only exports
       C symbols, so nothing can link its crates through it.
 
     Args:
+        attr (struct): The rule's attributes. `deps` and `link_deps` must provide
+            `LinkableMoreThanOnceInfo`.
         crate_info (CrateInfo): The crate.
         dep_info (DepInfo): The crate's dependency info.
         toolchain (rust_toolchain): The current `rust_toolchain`.
@@ -2904,10 +2908,25 @@ def _establish_cc_shared_library_info(crate_info, dep_info, toolchain, linker_in
         if [lib for lib in dep_linker_input.libraries if not _is_dylib(lib)]:
             native_libs[label] = None
 
+    linkable_more_than_once = {
+        label: None
+        for label in depset(transitive = [
+            dep[LinkableMoreThanOnceInfo].labels
+            for dep in getattr(attr, "deps", []) + getattr(attr, "link_deps", [])
+            if LinkableMoreThanOnceInfo in dep
+        ]).to_list()
+    }
+    if LINKABLE_MORE_THAN_ONCE in getattr(attr, "tags", []):
+        linkable_more_than_once[str(linker_input.owner)] = None
+
     return CcSharedLibraryInfo(
         dynamic_deps = dynamic_deps,
         exports = crates.keys() if crate_info.type == "dylib" else [],
-        link_once_static_libs = crates.keys() + native_libs.keys(),
+        link_once_static_libs = [
+            label
+            for label in crates.keys() + native_libs.keys()
+            if label not in linkable_more_than_once
+        ],
         linker_input = linker_input,
     )
 
