@@ -1239,7 +1239,19 @@ _rust_shared_library_transition = transition(
 
 rust_cdylib_library = rule(
     implementation = _rust_cdylib_library_impl,
-    attrs = _COMMON_ATTRS | _PLATFORM_ATTRS | _EXPERIMENTAL_USE_CC_COMMON_LINK_ATTRS,
+    attrs = _COMMON_ATTRS | _PLATFORM_ATTRS | _EXPERIMENTAL_USE_CC_COMMON_LINK_ATTRS | {
+        "link_std_dylib": attr.bool(
+            mandatory = False,
+            default = False,
+            doc = dedent("""\
+                Flag to dynamically link the standard library as a Rust dylib .so object when building this library.
+
+                Default is false. This is required for a shared library that depends on a Rust ABI dylib
+                (`rust_dylib_library`), since the standard library must then be linked dynamically by every
+                crate in the process.
+            """),
+        ),
+    },
     fragments = ["cpp"],
     cfg = _rust_shared_library_transition,
     toolchains = [

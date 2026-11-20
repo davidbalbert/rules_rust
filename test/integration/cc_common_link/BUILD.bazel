@@ -2,6 +2,7 @@ load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
 load(
     "@rules_rust//rust:defs.bzl",
     "rust_binary",
+    "rust_dylib_library",
     "rust_library",
     "rust_shared_library",
     "rust_test",
@@ -61,4 +62,33 @@ cc_test(
         "main.cc",
     ],
     deps = [":cdylib"],
+)
+
+# A C ABI shared library depending on a Rust ABI dylib, so the standard library
+# is linked dynamically, loaded with dlopen from this test's runfiles, the way
+# Python loads extension modules. The `_solib_<cpu>` symlinks that rules_cc's
+# rpaths point to must be in the runfiles.
+rust_dylib_library(
+    name = "dylib",
+    srcs = ["dylib.rs"],
+    edition = "2021",
+    target_compatible_with = ["@platforms//os:linux"],
+)
+
+rust_shared_library(
+    name = "cdylib_with_dylib_dep",
+    srcs = ["cdylib_with_dylib_dep.rs"],
+    edition = "2021",
+    link_std_dylib = True,
+    target_compatible_with = ["@platforms//os:linux"],
+    deps = [":dylib"],
+)
+
+cc_test(
+    name = "cdylib_with_dylib_dep_dlopen_test",
+    srcs = ["dlopen.c"],
+    args = ["$(rootpath :cdylib_with_dylib_dep)"],
+    data = [":cdylib_with_dylib_dep"],
+    linkopts = ["-ldl"],
+    target_compatible_with = ["@platforms//os:linux"],
 )
