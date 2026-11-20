@@ -1,5 +1,5 @@
 load("@rules_cc//cc:defs.bzl", "cc_test")
-load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_dylib_library", "rust_test")
+load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_dylib_library", "rust_shared_library", "rust_test")
 
 # Integration tests for rust_dylib_library: verifies that a binary depending
 # on a Rust ABI dylib can be built and run, exercising runfiles inclusion
@@ -46,6 +46,30 @@ cc_test(
     srcs = ["dlopen.c"],
     args = ["$(rootpath @rust_dylib_in_external_repo//:dylib_with_dylib_dep)"],
     data = ["@rust_dylib_in_external_repo//:dylib_with_dylib_dep"],
+    linkopts = select({
+        "@platforms//os:linux": ["-ldl"],
+        "//conditions:default": [],
+    }),
+    target_compatible_with = NOT_WINDOWS,
+)
+
+# A C ABI shared library depending on a Rust ABI dylib, which requires the
+# standard library to be linked dynamically, loaded with dlopen the way Python
+# loads a pyo3 extension module.
+rust_shared_library(
+    name = "shared_lib_with_dylib_dep",
+    srcs = ["shared_lib.rs"],
+    edition = "2021",
+    link_std_dylib = True,
+    target_compatible_with = NOT_WINDOWS,
+    deps = [":rust_dylib_lib"],
+)
+
+cc_test(
+    name = "shared_lib_with_dylib_dep_dlopen_test",
+    srcs = ["dlopen.c"],
+    args = ["$(rootpath :shared_lib_with_dylib_dep)"],
+    data = [":shared_lib_with_dylib_dep"],
     linkopts = select({
         "@platforms//os:linux": ["-ldl"],
         "//conditions:default": [],

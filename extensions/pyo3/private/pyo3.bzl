@@ -262,6 +262,7 @@ def pyo3_extension(
         version = None,
         compilation_mode = "opt",
         module_name = None,
+        link_std_dylib = False,
         **kwargs):
     """Define a PyO3 python extension module.
 
@@ -308,6 +309,10 @@ def pyo3_extension(
         compilation_mode (str, optional): The [compilation_mode](https://bazel.build/reference/command-line-reference#flag--compilation_mode)
             value to build the extension for. If set to `"current"`, the current configuration will be used.
         module_name (str, optional): A full dotted Python module path implemented by this extension (e.g. `foo.bar`).
+        link_std_dylib (bool, optional): Whether to dynamically link the Rust standard library.
+            Required when the extension depends on a `rust_dylib_library`, for example one that several
+            extensions share so that a Python process loads one copy of its crates.
+            For more details see [rust_shared_library][rsl].
         **kwargs (dict): Additional keyword arguments.
     """
     tags = kwargs.pop("tags", [])
@@ -344,6 +349,7 @@ def pyo3_extension(
         ] + deps,
         link_deps = link_deps,
         edition = edition,
+        link_std_dylib = link_std_dylib,
         lint_config = lint_config,
         proc_macro_deps = proc_macro_deps,
         rustc_env = rustc_env,

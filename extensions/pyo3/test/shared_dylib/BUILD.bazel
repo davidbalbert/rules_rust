@@ -1,0 +1,59 @@
+load("@rules_python//python:defs.bzl", "py_test")
+load("@rules_rust//rust:defs.bzl", "rust_dylib_library")
+load("//:defs.bzl", "pyo3_extension")
+
+# Two extension modules sharing Rust ABI dylibs, so that a Python process loads
+# one copy of the crates in them, and of the standard library, rather than one
+# per extension.
+#
+# Linux only: on macOS, a dylib containing pyo3 would also need
+# `-undefined dynamic_lookup`, as `pyo3_extension` adds for extensions.
+LINUX_ONLY = ["@platforms//os:linux"]
+
+# A crate with global state: two extensions linking it statically would each
+# have their own counter.
+rust_dylib_library(
+    name = "counter",
+    srcs = ["counter.rs"],
+    edition = "2021",
+    target_compatible_with = LINUX_ONLY,
+)
+
+# A `#[pyclass]`, and pyo3 itself: its type object is global state too, so an
+# instance created by one extension is only an instance of the class in the
+# other if they share it.
+rust_dylib_library(
+    name = "shapes",
+    srcs = ["shapes.rs"],
+    edition = "2021",
+    target_compatible_with = LINUX_ONLY,
+    deps = ["//private:current_rust_pyo3_toolchain"],
+)
+
+[
+    pyo3_extension(
+        name = name,
+        srcs = [name + ".rs"],
+        edition = "2021",
+        link_std_dylib = True,
+        target_compatible_with = LINUX_ONLY,
+        deps = [
+            ":counter",
+            ":shapes",
+        ],
+    )
+    for name in [
+        "ext_a",
+        "ext_b",
+    ]
+]
+
+py_test(
+    name = "shared_dylib_test",
+    srcs = ["shared_dylib_test.py"],
+    target_compatible_with = LINUX_ONLY,
+    deps = [
+        ":ext_a",
+        ":ext_b",
+    ],
+)

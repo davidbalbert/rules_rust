@@ -1,7 +1,7 @@
 """Analysis tests for experimental_link_std_dylib flag"""
 
 load("@rules_cc//cc:defs.bzl", "CcInfo")
-load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_dylib_library", "rust_library", "rust_test")
+load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_dylib_library", "rust_library", "rust_shared_library", "rust_test")
 load("@rules_testing//lib:analysis_test.bzl", "analysis_test", "test_suite")
 
 # buildifier: disable=bzl-visibility
@@ -91,6 +91,31 @@ def _test_rust_dylib_with_attr(name):
         targets = {
             "default_target": name + "_rust_dylib_no_std_dylib",
             "target_with_std_dylib": name + "_rust_dylib_link_std",
+        },
+    )
+
+def _test_rust_shared_library_with_attr(name):
+    rust_shared_library(
+        name = name + "_rust_shared_library",
+        srcs = ["lib.rs"],
+        edition = "2021",
+        tags = ["manual"],
+    )
+
+    rust_shared_library(
+        name = name + "_rust_shared_library_link_std",
+        srcs = ["lib.rs"],
+        edition = "2021",
+        tags = ["manual"],
+        link_std_dylib = True,
+    )
+
+    analysis_test(
+        name = name,
+        impl = _test_prefer_dynamic_impl,
+        targets = {
+            "default_target": name + "_rust_shared_library",
+            "target_with_std_dylib": name + "_rust_shared_library_link_std",
         },
     )
 
@@ -344,6 +369,7 @@ def link_std_dylib_test_suite(name):
             _test_rust_library,
             _test_rust_binary_with_attr_dylib,
             _test_rust_dylib_with_attr,
+            _test_rust_shared_library_with_attr,
             _test_rust_test_with_attr,
             _test_runfiles_rpath,
             _test_std_dylib_runfiles_rpath,

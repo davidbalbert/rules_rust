@@ -2261,6 +2261,18 @@ def rustc_compile_action(
         ]
         transitive_runfiles.append(ctx.runfiles(files = dep_dylib_files))
 
+    if dep_cc_infos:
+        # With cc_common.link, rules_cc sets rpaths to the `_solib_<cpu>` symlinks of the dynamic
+        # libraries it links, including the standard library's when it is linked dynamically, so
+        # those symlinks must be in the runfiles too.
+        transitive_runfiles.append(ctx.runfiles(files = [
+            library_to_link.dynamic_library
+            for cc_info in dep_cc_infos
+            for linker_input in cc_info.linking_context.linker_inputs.to_list()
+            for library_to_link in linker_input.libraries
+            if _is_dylib(library_to_link) and library_to_link.dynamic_library
+        ]))
+
     # On Windows there is no RPATH equivalent. Create symlinks of dylib files
     # next to the binary so the Windows loader can find them. Bazel deduplicates
     # identical symlink actions when multiple binaries in a package share a dylib dep.
